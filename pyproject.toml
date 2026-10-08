@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mem0-aerospike"
+version = "0.1.0"
+description = "Aerospike vector-store provider for mem0ai, registered at import time without modifying mem0ai"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+keywords = ["mem0", "aerospike", "vector-store", "memory"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "mem0ai>=2.0.0,<3.0.0",
+    "aerospike-sdk>=0.9.0a5,<0.10.0",
+    "pydantic>=2.7.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mem0_aerospike"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mem0_aerospike", "tests", "README.md", "LICENSE", "NOTICE"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: tests that require a running Aerospike server",
+]
