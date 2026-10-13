@@ -19,7 +19,6 @@ classifiers = [
 ]
 dependencies = [
     "mem0ai>=2.0.0,<3.0.0",
-    "aerospike-sdk>=0.9.0a5,<0.10.0",
     "pydantic>=2.7.3",
 ]
 

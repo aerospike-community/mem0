@@ -1,13 +1,15 @@
 import json
+import logging
 from datetime import datetime, timezone
 
 try:
-    from aerospike_async import BatchWritePolicy, ExpOperation, Operation
+    from aerospike_async import BatchWritePolicy, Expiration, ExpOperation, Operation
     from aerospike_sdk import (
         Behavior,
         DataSet,
         Exp,
         Filter,
+        Host,
         Order,
         OrderByType,
         ResultCode,
@@ -35,6 +37,8 @@ from mem0_aerospike.filters import (
 )
 from mem0_aerospike.models import MemoryResult
 
+logger = logging.getLogger(__name__)
+
 
 def _iso_to_epoch_ms(value: str) -> int:
     dt = datetime.fromisoformat(value)
@@ -59,6 +63,7 @@ class AerospikeDB(VectorStoreBase):
         embedding_model_dims: int,
         host: str = "localhost",
         port: int = 3000,
+        hosts: list[tuple[str, int]] | None = None,
         allow_scans_with_where: bool = False,
         max_record_bytes: int = 943718,
     ):
@@ -70,6 +75,8 @@ class AerospikeDB(VectorStoreBase):
             embedding_model_dims: Dimension of stored embedding vectors.
             host: Seed host.
             port: Seed port.
+            hosts: Seed nodes as ``(host, port)`` pairs for multi-node
+                clusters; overrides ``host``/``port`` when provided.
             allow_scans_with_where: Permit filtered queries without a
                 user_id/agent_id/run_id scope predicate to fall back to a scan.
             max_record_bytes: Client-side record-size guardrail (~0.9 MiB default).
@@ -79,11 +86,18 @@ class AerospikeDB(VectorStoreBase):
         self.embedding_model_dims = embedding_model_dims
         self.host = host
         self.port = port
+        self.hosts = hosts
         self.allow_scans_with_where = allow_scans_with_where
         self.max_record_bytes = max_record_bytes
         self.dataset = DataSet.of(namespace, collection_name)
 
-        self._cluster = ClusterDefinition(host, port).connect()
+        if hosts:
+            logger.debug("Connecting to Aerospike seeds %s", hosts)
+            self._cluster = ClusterDefinition(hosts=[Host(h, p) for h, p in hosts]).connect()
+        else:
+            logger.debug("Connecting to Aerospike at %s:%s", host, port)
+            self._cluster = ClusterDefinition(host, port).connect()
+        logger.info("Connected to Aerospike namespace=%s set=%s", namespace, collection_name)
         # sendKey = true so memory_id can be recovered from secondary-index and
         # Top-K query results, which otherwise return only digests.
         behavior = Behavior.DEFAULT.derive_with_changes(f"mem0-aerospike-{collection_name}", send_key=True)
@@ -95,6 +109,10 @@ class AerospikeDB(VectorStoreBase):
         self._batch_write_policy.send_key = batch_write_settings.send_key
         self._batch_write_policy.commit_level = batch_write_settings.commit_level
         self._batch_write_policy.durable_delete = batch_write_settings.durable_delete
+        # Chained batch writes cannot carry send_key on this SDK branch, so
+        # insert() stays on batch_write_blocking; expiration is set directly
+        # on the write policy to keep the never-expire write contract.
+        self._batch_write_policy.expiration = Expiration.NEVER_EXPIRE
 
         self.create_col()
 
@@ -102,8 +120,12 @@ class AerospikeDB(VectorStoreBase):
         """Close the underlying Aerospike cluster connection, idempotently."""
         cluster = getattr(self, "_cluster", None)
         if cluster is not None:
+            logger.debug("Closing Aerospike cluster connection")
             cluster.close()
             self._cluster = None
+
+    def __enter__(self) -> "AerospikeDB":
+        return self
 
     def __exit__(self, *exc):
         self.close()
@@ -246,7 +268,7 @@ class AerospikeDB(VectorStoreBase):
         self._check_size(payload or {}, vector)
         bins = self._payload_to_bins(payload or {}, vector)
         key = self.dataset.id(vector_id)
-        self.session.upsert(key).put(bins).execute()
+        self.session.upsert(key).put(bins).never_expire().execute()
 
     # -- Filtered access: shared scoping guard ----------------------------------
 
@@ -340,7 +362,8 @@ class AerospikeDB(VectorStoreBase):
             if not row.is_ok or row.record is None:
                 continue
             bins = dict(row.record.bins)
-            score = bins.pop("score", None)
+            raw_score = bins.pop("score", None)
+            score = max(0.0, raw_score) if raw_score is not None else None
             payload = self._bins_to_payload(bins)
             results.append(MemoryResult(id=row.record.key.value, payload=payload, score=score))
         return results

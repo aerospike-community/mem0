@@ -11,6 +11,10 @@ class AerospikeConfig(BaseModel):
     embedding_model_dims: int = Field(1536, description="Dimensions of the embedding vectors")
     host: str = Field("localhost", description="Aerospike seed host")
     port: int = Field(3000, description="Aerospike seed port")
+    hosts: list[tuple[str, int]] | None = Field(
+        None,
+        description="Aerospike seed nodes as (host, port) pairs for multi-node clusters; overrides host/port when set",
+    )
     allow_scans_with_where: bool = Field(
         False,
         description=(

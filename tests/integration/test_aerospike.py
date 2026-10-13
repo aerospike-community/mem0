@@ -338,7 +338,7 @@ def test_update_without_vector_preserves_embedding(db):
 def test_insert_oversized_record_raises(db):
     """5.1 RED: insert rejects a record larger than max_record_bytes before writing."""
     payload = _payload("size_user", data="x" * 2_000_000)
-    with pytest.raises(Exception, match="record size|max_record_bytes|too large"):
+    with pytest.raises(ValueError, match="record size|max_record_bytes|too large"):
         db.insert(vectors=[_sample_vector()], payloads=[payload], ids=["oversized-insert-id"])
 
 
@@ -346,7 +346,7 @@ def test_update_oversized_record_raises(db):
     """5.3 RED: update rejects a record larger than max_record_bytes before writing."""
     db.insert(vectors=[_sample_vector()], payloads=[_payload("size_user_update")], ids=["oversized-update-id"])
     oversized_payload = _payload("size_user_update", data="x" * 2_000_000)
-    with pytest.raises(Exception, match="record size|max_record_bytes|too large"):
+    with pytest.raises(ValueError, match="record size|max_record_bytes|too large"):
         db.update("oversized-update-id", vector=_sample_vector(), payload=oversized_payload)
 
 

@@ -138,7 +138,8 @@ def test_delete_executes(db):
 
 def test_update_executes_upsert(db):
     db.update("id-1", vector=[1.0], payload=_payload(data="new"))
-    db.session.upsert.return_value.put.return_value.execute.assert_called_once()
+    chain = db.session.upsert.return_value.put.return_value.never_expire.return_value
+    chain.execute.assert_called_once()
 
 
 # -- collection lifecycle -------------------------------------------------------
