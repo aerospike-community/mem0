@@ -39,6 +39,7 @@ def test_helper_forwards_all_provider_fields():
         "port": 3100,
         "allow_scans_with_where": True,
         "max_record_bytes": 1024,
+        "order_list_results": True,
     }
     cfg = create_memory_config(vector_store=fields)
     provider_cfg = cfg.vector_store.config

@@ -75,6 +75,22 @@ def db_allowing_scans():
     _truncate_collection(instance)
 
 
+@pytest.fixture
+def db_ordered():
+    """Instance configured to order list() results by created_at_ms descending."""
+    instance = AerospikeDB(
+        namespace=NAMESPACE,
+        collection_name="mem0_aerospike_test_ordered",
+        embedding_model_dims=EMBEDDING_DIMS,
+        host=HOST,
+        port=PORT,
+        order_list_results=True,
+    )
+    _truncate_collection(instance)
+    yield instance
+    _truncate_collection(instance)
+
+
 def _iso(ts: datetime) -> str:
     # Millisecond precision: the provider stores created_at/updated_at as
     # created_at_ms/updated_at_ms int64 epoch-ms bins (see spec), so a
@@ -457,6 +473,23 @@ def test_list_unscoped_filter_allows_scan_when_configured(db_allowing_scans):
     memories = results[0]
     assert len(memories) == 1
     assert memories[0].id == "scan-id"
+
+
+def test_list_ordered_returns_newest_first(db_ordered):
+    """6.8: with order_list_results=True, list() returns created_at descending."""
+    db = db_ordered
+    user_id = "ordered_user"
+    db.insert(
+        vectors=[_sample_vector(i) for i in range(3)],
+        payloads=[
+            _payload(user_id, created_at="2025-01-01T00:00:00.000+00:00"),
+            _payload(user_id, created_at="2025-03-01T00:00:00.000+00:00"),
+            _payload(user_id, created_at="2025-02-01T00:00:00.000+00:00"),
+        ],
+        ids=["ord-oldest", "ord-newest", "ord-middle"],
+    )
+    results = db.list(filters={"user_id": user_id}, top_k=10)
+    assert [m.id for m in results[0]] == ["ord-newest", "ord-middle", "ord-oldest"]
 
 
 @pytest.mark.parametrize(

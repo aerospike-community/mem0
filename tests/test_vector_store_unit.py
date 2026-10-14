@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from aerospike_sdk import ResultCode
+from aerospike_sdk import Order, OrderByType, ResultCode
 from aerospike_sdk.exceptions import AerospikeError
 
 import mem0_aerospike  # noqa: F401  -- registers the provider
@@ -210,6 +210,66 @@ def test_resolve_scope_rejects_unscoped_by_default(db):
 def test_resolve_scope_allows_scan_when_configured(db):
     db.allow_scans_with_where = True
     assert db._resolve_scope({"category": "work"}) == (None, None)
+
+
+# -- list() ordering ------------------------------------------------------------
+
+
+def test_list_uses_unordered_limit_by_default(db):
+    chain = db.session.query.return_value.bins.return_value
+    chain.execute.return_value = []
+    db.list(top_k=5)
+    chain.limit.assert_called_once_with(5)
+    chain.order_by.assert_not_called()
+
+
+def test_list_orders_by_created_at_ms_when_enabled(db):
+    db.order_list_results = True
+    chain = db.session.query.return_value.bins.return_value
+
+    def _row(vector_id, created_at):
+        bins = db._payload_to_bins(_payload(created_at=created_at), vector=[1.0])
+        bins.pop("embedding")
+        row = MagicMock(is_ok=True)
+        row.record.key.value = vector_id
+        row.record.bins = bins
+        return row
+
+    chain.order_by.return_value.top_k.return_value.execute.return_value = [
+        _row("newest", "2025-03-01T00:00:00.000+00:00"),
+        _row("middle", "2025-02-01T00:00:00.000+00:00"),
+        _row("oldest", "2025-01-01T00:00:00.000+00:00"),
+    ]
+
+    results = db.list(top_k=3)
+    chain.order_by.assert_called_once_with("created_at_ms", OrderByType.INTEGER, Order.DESC)
+    chain.order_by.return_value.top_k.assert_called_once_with(3)
+    chain.limit.assert_not_called()
+    assert [m.id for m in results[0]] == ["newest", "middle", "oldest"]
+    assert [m.payload["created_at"] for m in results[0]] == [
+        "2025-03-01T00:00:00.000+00:00",
+        "2025-02-01T00:00:00.000+00:00",
+        "2025-01-01T00:00:00.000+00:00",
+    ]
+
+
+def test_list_order_flag_is_noop_without_top_k(db):
+    db.order_list_results = True
+    chain = db.session.query.return_value.bins.return_value
+    chain.execute.return_value = []
+    db.list()
+    chain.order_by.assert_not_called()
+    chain.limit.assert_not_called()
+
+
+def test_create_col_creates_ordering_index_when_enabled(db):
+    db.session.index.reset_mock()
+    db.order_list_results = True
+    db.create_col()
+    assert db.session.index.call_count == 4  # user_id, agent_id, run_id, created_at_ms
+    type_chain = db.session.index.return_value.on_bin.return_value.named.return_value
+    type_chain.numeric.assert_called_once()
+    assert type_chain.string.call_count == 3
 
 
 def test_keyword_search_returns_none(db):

@@ -66,6 +66,7 @@ class AerospikeDB(VectorStoreBase):
         hosts: list[tuple[str, int]] | None = None,
         allow_scans_with_where: bool = False,
         max_record_bytes: int = 943718,
+        order_list_results: bool = False,
     ):
         """Connect to Aerospike, derive a sendKey-enabled session, and create the collection.
 
@@ -80,6 +81,9 @@ class AerospikeDB(VectorStoreBase):
             allow_scans_with_where: Permit filtered queries without a
                 user_id/agent_id/run_id scope predicate to fall back to a scan.
             max_record_bytes: Client-side record-size guardrail (~0.9 MiB default).
+            order_list_results: Order ``list()`` results by ``created_at_ms``
+                descending and register a ``created_at_ms`` secondary index in
+                ``create_col()``. Off by default, keeping unordered results.
         """
         self.namespace = namespace
         self.collection_name = collection_name
@@ -89,6 +93,7 @@ class AerospikeDB(VectorStoreBase):
         self.hosts = hosts
         self.allow_scans_with_where = allow_scans_with_where
         self.max_record_bytes = max_record_bytes
+        self.order_list_results = order_list_results
         self.dataset = DataSet.of(namespace, collection_name)
 
         if hosts:
@@ -154,6 +159,17 @@ class AerospikeDB(VectorStoreBase):
                 continue
             task = self.session.index(dataset=dataset).on_bin(field).named(index_name).string().create()
             task.wait_till_complete_blocking()
+        if self.order_list_results:
+            index_name = f"{collection_name}_created_at_ms_idx"
+            if index_name not in existing:
+                task = (
+                    self.session.index(dataset=dataset)
+                    .on_bin("created_at_ms")
+                    .named(index_name)
+                    .numeric()
+                    .create()
+                )
+                task.wait_till_complete_blocking()
 
     def list_cols(self):
         """Return the names of all sets (collections) in the namespace."""
@@ -313,6 +329,10 @@ class AerospikeDB(VectorStoreBase):
         Queries are scoped by a secondary-index predicate on
         user_id/agent_id/run_id when available; a metadata-only filter raises
         unless ``allow_scans_with_where`` is set.
+
+        When ``order_list_results`` is enabled and ``top_k`` is provided,
+        results are ordered by ``created_at_ms`` descending; otherwise
+        ordering is unspecified and ``top_k`` is an unordered limit.
         """
         scope_field, scope_value = self._resolve_scope(filters)
         query = self.session.query(self.dataset)
@@ -323,7 +343,9 @@ class AerospikeDB(VectorStoreBase):
             query = query.where(remaining_expr)
 
         query = query.bins(self._read_bin_names())
-        if top_k:
+        if self.order_list_results and top_k:
+            query = query.order_by("created_at_ms", OrderByType.INTEGER, Order.DESC).top_k(top_k)
+        elif top_k:
             query = query.limit(top_k)
 
         results = []

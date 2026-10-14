@@ -25,3 +25,10 @@ class AerospikeConfig(BaseModel):
         943718,
         description="Maximum serialized record size in bytes before client-side rejection (default ~0.9 MiB)",
     )
+    order_list_results: bool = Field(
+        False,
+        description=(
+            "Order list() results by created_at_ms descending and create a created_at_ms "
+            "secondary index in create_col() (opt-in; default keeps unordered results)"
+        ),
+    )
