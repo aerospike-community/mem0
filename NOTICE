@@ -1,0 +1,10 @@
+mem0-aerospike
+Copyright 2025 Aerospike, Inc.
+
+This product includes software developed by the Mem0 team
+(https://github.com/mem0ai/mem0), licensed under the Apache License,
+Version 2.0.
+
+The Aerospike vector-store provider and configuration in this package are
+derived from the Mem0 project and adapted to run as an external,
+import-time-registered provider for unmodified `mem0ai` installations.
